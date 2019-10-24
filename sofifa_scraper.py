@@ -67,18 +67,21 @@ def apply_reduce_position(df):
 	fd =pd.DataFrame()
 	fd["reduced_position"] = df["Position"].apply(position_to_idx)
 	return fd["reduced_position"]
-def construct_usable_training_data(df):
+def construct_usable_training_data(df, teams_list):
 	#reduce dataframe to 11x20 players
 	#TODO after this function : sort the data to make it used by the neural network
 	tmp_df = df
 	new_df = pd.DataFrame(columns=["Name", "Club", "Overall", "Position", "reduced_position"])
 	curr_index = 0
-	
+	"""
 	teams = ["Manchester United", "Leicester City", "Bournemouth", "Cardiff City", "Fulham",
 			"Crystal Palace", "Huddersfield Town", "Chelsea", "Newcastle United", "Tottenham Hotspur",
 			"Watford", "Brighton & Hove Albion", "Wolverhampton Wanderers", "Everton", "Arsenal", 
 			"Manchester City", "Liverpool", "West Ham United", "Southampton", "Burnley"]
+	"""
+	teams = teams_list
 	for i in teams: 
+		print (i)
 		#add GK to DF
 		GK_df = tmp_df.loc[tmp_df["Club"].isin([i])].loc[tmp_df["reduced_position"].isin([0])]
 		#print (GK_df)
@@ -227,36 +230,39 @@ def train_model():
 	training_columns = ["HTGK", "HTDF1", "HTDF2", "HTDF3", "HTDF4", "HTMF1", "HTMF2", "HTMF3", "HTFW1", "HTFW2", "HTFW3", 
 	"ATGK", "ATDF1", "ATDF2", "ATDF3", "ATDF4", "ATMF1", "ATMF2", "ATMF3", "ATFW1", "ATFW2", "ATFW3"]
 	target_columns = [ "HTG", "ATG"]
-	#l1_results_df = read_db_from_csv("resultats-ligue-1-18-19.csv", ";")
+	l1_results_df = read_db_from_csv("resultats-ligue-1-18-19.csv", ";")
 	players_df = read_db_from_csv("players_data_19.csv", ",")
 	results_df = read_db_from_csv("pl_season-1819.csv", ",")
-	#results_df = pd.concat([results_df, l1_results_df)]
-	results_df = results_df.reset_index(drop=True)
-	#print(players_df.describe())
-	#print(results_df.describe())
+
 	targets = results_df[["HomeTeam", "AwayTeam", "FTHG", "FTAG"]]
-	#print(targets.describe())
+	l1_results_df = l1_results_df[["HomeTeam", "AwayTeam", "FTHG", "FTAG"]]
+	
+	targets = pd.concat([targets, l1_results_df])
+	targets = targets.reset_index(drop=True)
+	targets = targets.reindex(np.random.permutation(targets.index))
+	print (targets.tail (50))
 	players_df["Position"] = select_position(players_df)
 	features = players_df[["Name", "Club", "Overall", "Position"]]
 	features["reduced_position"]= apply_reduce_position(features)
 	#print (features.loc[features["Club"].isin(["Southampton"])])
-	tmp = construct_usable_training_data(features)
+	teams_list = targets["HomeTeam"].unique()
+	print (teams_list)
+	tmp = construct_usable_training_data(features, teams_list)
 	training_data = construct_training_data(tmp, targets)
 	training_data = training_data.reindex(np.random.permutation(training_data.index))
 	#select training and test data from dataframe
 	test_data = training_data.tail(50)
 	test_features = test_data[training_columns]
 	test_targets = test_data[target_columns]
-	training_data = training_data.head(330)
+	training_data = training_data.head(710)
 	training_features = training_data[training_columns]
 	training_targets = training_data[target_columns]
 	
 	model = tf.keras.models.Sequential([
     tf.keras.layers.Dense(22, activation='relu'),
 	tf.keras.layers.Dense(128, activation='relu'),
-    tf.keras.layers.Dense(128, activation='relu'),
-	tf.keras.layers.Dense(128, activation='relu'),
-	tf.keras.layers.Dense(128, activation='relu'),
+	tf.keras.layers.Dense(70, activation='relu'),
+	tf.keras.layers.Dense(24, activation='relu'),
     tf.keras.layers.Dense(2)])
 
 	optimizer = tf.keras.optimizers.RMSprop(0.002)
@@ -265,13 +271,14 @@ def train_model():
 	model.compile(loss='mae', optimizer=optimizer, metrics = ["mae", "mse"])
 
 	
-	EPOCHS = 500
-
+	EPOCHS = 1000
+	
 	history = model.fit(
 		tf.convert_to_tensor(training_features.to_numpy(), np.int32), tf.convert_to_tensor(training_targets.to_numpy(), np.int32),
-		epochs=EPOCHS, validation_split = 0.1, verbose=0,batch_size = 10,
+		epochs=EPOCHS, validation_split = 0.2, verbose=0,
 		callbacks=[PrintDot()], shuffle=True)
-	#plot_history(history)
+	
+	plot_history(history)
 	
 	loss, mae, mse = model.evaluate(tf.convert_to_tensor(test_features.to_numpy(), np.int32), tf.convert_to_tensor(test_targets.to_numpy(), np.int32), verbose=2)
 	test_predictions = model.predict(tf.convert_to_tensor(test_features.to_numpy(), np.int32))
@@ -286,7 +293,7 @@ def train_model():
 			
 		print ("predicted score is {}-{}, real score is  {} - {}, correct guesses : {}".format(
 		int(test_predictions[i][0]), int(test_predictions[i][1]),test_targets.to_numpy()[i][0], test_targets.to_numpy()[i][1], nb_good_winners))
-		
+	
 	return model
 	
 	
